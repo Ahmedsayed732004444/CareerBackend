@@ -3,6 +3,7 @@ using Career_Path.Hubs;
 using Career_Path.Services.Abstraction;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.SignalR;
+
 namespace Career_Path.Services;
 
 
@@ -43,11 +44,14 @@ public class NotificationService(
     {
         try
         {
-            // تحقق إن الـ in-app مفعّل للمستخدم ده
+            // تحقق من الـ preferences للقناتين مع بعض دفعة واحدة
             var inAppEnabled = await IsInAppEnabledAsync(recipientId, type, ct);
-            if (!inAppEnabled) return;
+            var emailEnabled = await IsEmailEnabledAsync(recipientId, type, ct);
 
-            // منع التكرار: لو نفس النوع وnفس الـ entity وما اتقراتش بعد
+            // لو القناتين معطّلتين ما فيش داعي نكمل خالص
+            if (!inAppEnabled && !emailEnabled) return;
+
+            // منع التكرار: لو نفس النوع ونفس الـ entity وما اتقراتش بعد
             if (entityId is not null && type == NotificationType.NewMessage)
             {
                 var hasDuplicate = await _context.Notifications
@@ -71,27 +75,32 @@ public class NotificationService(
                 EntityId = entityId
             };
 
+            // بنحفظ الـ notification دايمًا في الـ DB (حتى لو in-app معطّل)
+            // عشان الـ email channel مستقل
             _context.Notifications.Add(notification);
             await _context.SaveChangesAsync(ct);
 
-            // بناء الـ DTO
-            var actor = actorId is not null ? await _userManager.FindByIdAsync(actorId) : null;
-            var response = MapToResponse(notification, actor);
-
-            // إرسال real-time عن طريق SignalR
-            try
+            // إرسال real-time عن طريق SignalR — بس لو in-app مفعّل
+            if (inAppEnabled)
             {
-                await _hubContext.Clients.User(recipientId).ReceiveNotification(response);
-                var unreadCount = await GetUnreadCountAsync(recipientId, ct);
-                await _hubContext.Clients.User(recipientId).UnreadCountUpdated(unreadCount);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to push notification via SignalR to user {UserId}", recipientId);
+                var actor = actorId is not null ? await _userManager.FindByIdAsync(actorId) : null;
+                var response = MapToResponse(notification, actor);
+
+                try
+                {
+                    await _hubContext.Clients.User(recipientId).ReceiveNotification(response);
+                    var unreadCount = await GetUnreadCountAsync(recipientId, ct);
+                    await _hubContext.Clients.User(recipientId).UnreadCountUpdated(unreadCount);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to push notification via SignalR to user {UserId}", recipientId);
+                }
             }
 
-            // إرسال email لو مفعّل
-            await TrySendEmailAsync(recipientId, type, title, message, ct);
+            // إرسال email لو مفعّل — بنمرر الـ Id مباشرة بدون query جديدة
+            if (emailEnabled)
+                await TrySendEmailAsync(recipientId, notification.Id, title, message, ct);
         }
         catch (Exception ex)
         {
@@ -360,29 +369,23 @@ public class NotificationService(
         return pref?.EmailEnabled ?? EmailDefaultTypes.Contains(type);
     }
 
+    // بتاخد notificationId مباشرة — مش بتعمل query تانية تلاقيه
     private async Task TrySendEmailAsync(
         string recipientId,
-        NotificationType type,
+        string notificationId,
         string title,
         string body,
         CancellationToken ct)
     {
         try
         {
-            var emailEnabled = await IsEmailEnabledAsync(recipientId, type, ct);
-            if (!emailEnabled) return;
-
             var user = await _userManager.FindByIdAsync(recipientId);
             if (user?.Email is null) return;
 
             await _emailSender.SendEmailAsync(user.Email, title, body);
 
-            // علّم الـ notification إن الـ email اتبعت
-            var notification = await _context.Notifications
-                .Where(n => n.RecipientId == recipientId && n.Type == type)
-                .OrderByDescending(n => n.CreatedAt)
-                .FirstOrDefaultAsync(ct);
-
+            // بنجيب الـ notification بالـ PK مباشرة — بدون query زيادة
+            var notification = await _context.Notifications.FindAsync([notificationId], ct);
             if (notification is not null)
             {
                 notification.EmailSent = true;
@@ -391,8 +394,7 @@ public class NotificationService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to send notification email to user {UserId} for type {Type}",
-                recipientId, type);
+            _logger.LogWarning(ex, "Failed to send notification email to user {UserId}", recipientId);
         }
     }
 

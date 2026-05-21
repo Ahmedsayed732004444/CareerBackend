@@ -20,6 +20,7 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapOpenApi();
 app.UseSwaggerUI(options =>
 {

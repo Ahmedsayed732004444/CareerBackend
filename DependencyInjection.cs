@@ -69,6 +69,7 @@ namespace Career_Path
             services.AddScoped<IPostService, PostService>();
             services.AddScoped<ICommentService, CommentService>();
             services.AddScoped<IJobApplicationService, JobApplicationService>();
+            services.AddScoped<INotificationService, NotificationService>();
             services.AddScoped<IFollowService, FollowService>();
             services.AddScoped<IMembershipUpgradeService, MembershipUpgradeService>();
             services.AddScoped<IChatService, ChatService>();
