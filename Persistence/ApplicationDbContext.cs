@@ -25,6 +25,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<CommentReaction> CommentReactions { get; set; }
     public DbSet<UserFollow> UserFollows { get; set; }
     public DbSet<ReplyReaction> ReplyReactions { get; set; }
+    public DbSet<Notification> Notifications { get; set; }
+    public DbSet<NotificationPreference> NotificationPreferences { get; set; }
     public DbSet<Message> Messages { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
